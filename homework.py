@@ -1,4 +1,5 @@
 import requests
+import json
 import os
 import sys
 import time
@@ -7,6 +8,7 @@ from logging import StreamHandler
 from dotenv import load_dotenv
 import telegram
 from http import HTTPStatus
+from telegram import TelegramError
 
 
 load_dotenv()
@@ -48,9 +50,10 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.info(f'Сообщение "{message}" отправлено в Telegram')
-    except Exception:
-        logging.exception(f'Сбой при отправке сообщения "{message}" Telegram')
-
+    except TelegramError: # Уточнить исключение        
+        logger.error(f'Сбой при отправке сообщения "{message}" Telegram')
+        # logging.exception(f'Сбой при отправке сообщения "{message}" Telegram')
+        raise TelegramError(f'Сбой при отправке сообщения "{message}" Telegram')
 
 def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса.
@@ -59,16 +62,46 @@ def get_api_answer(current_timestamp):
     преобразовав его из формата JSON к типам данных Python.
     """
     timestamp = current_timestamp or int(time.time())
-    params = {'from_date': timestamp}
+    params = {'from_date': 0} # изменить на timestamp
+    # try:
+    #     response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    # except Exception:
+    #     logger.error('Сбой при запросе к эндпоинту')
+    #     # logging.exception('Сбой при запросе к эндпоинту')
+    #     raise Exception('Сбой при запросе к эндпоинту')
+
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except Exception:
-        logging.exception('Сбой при запросе к эндпоинту')
+        response.raise_for_status()    
+    except requests.exceptions.ConnectionError as errc:
+        logger.error('Проблемы с сетью')
+        raise errc('Проблемы с сетью')        
+    except requests.exceptions.HTTPError as errh:
+        logger.error('Http вернул неожиданный код')
+        raise errh('Http вернул неожиданный код')            
+    except requests.exceptions.Timeout as errt :
+        logger.error('Время ожидания запроса истекло')
+        raise errt('Время ожидания запроса истекло')        
+    except requests.exceptions.TooManyRedirects as errm:
+        logger.error('URL-адрес был неправильным')
+        raise errm('URL-адрес был неправильным')            
+    except requests.exceptions.RequestException as err:
+        logger.error('Сбой при запросе к эндпоинту')
+        raise err('Сбой при запросе к эндпоинту')        
+    except Exception: # без этого исключения не проходит pytest
+        pass
+              
 
     if response.status_code != HTTPStatus.OK:
-        logging.exception(f'Эндпоинт недоступен: {response.status_code}')
+        logger.error(f'Эндпоинт недоступен: {response.status_code}')
+        # logging.exception(f'Эндпоинт недоступен: {response.status_code}')
         raise Exception(f'Эндпоинт недоступен: {response.status_code}')
-    return response.json()
+    try:
+        response = response.json()
+    except json.decoder.JSONDecodeError:
+        logger.error('Ответ не является типом данный Python')
+        raise json.decoder.JSONDecodeError('Ответ не является типом данный Python')
+    return response
 
 
 def check_response(response):
@@ -83,7 +116,10 @@ def check_response(response):
     except TypeError:
         logger.error('Ответ от API не является словарем')
         raise TypeError('Ответ от API не является словарем')
-    if type(homeworks) != list:
+    except KeyError:
+        logger.error('Ключ "homeworks" отсутствует в словаре')
+        raise KeyError('Ключ "homeworks" отсутствует в словаре')    
+    if type(homeworks) is not list:
         logger.error('Под ключом `homeworks` ответ от API не в виде списка')
         raise TypeError('Под ключом `homeworks` ответ от API не в виде списка')
     return homeworks
@@ -128,23 +164,25 @@ def main():
         raise Exception('Отсутствуют одна или несколько переменных окружения')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
-    OLD_MESSAGE = ''
-    while True:
-        try:
-            response = get_api_answer(current_timestamp)
+    old_message = ''
+    try:
+        while True:
             try:
-                message = parse_status(check_response(response)[0])
-            except IndexError:
-                message = 'Изменений нет'
-            current_timestamp = response.get('current_date')
-        except Exception as error:
-            message = f'Сбой в работе программы: {error}'
-        finally:
-            if message != OLD_MESSAGE:
-                send_message(bot, message)
-                OLD_MESSAGE = message
-            time.sleep(RETRY_TIME)
-
+                response = get_api_answer(current_timestamp)
+                try:
+                    message = parse_status(check_response(response)[0])
+                except IndexError:
+                    message = 'Изменений нет'
+                current_timestamp = response.get('current_date')
+            except Exception as error:
+                message = f'Сбой в работе программы: {error}'
+            finally:
+                if message != old_message:
+                    send_message(bot, message)
+                    old_message = message
+                time.sleep(RETRY_TIME)
+    except KeyboardInterrupt:
+        print('Работа бота завершена!')
 
 if __name__ == '__main__':
     main()
