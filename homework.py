@@ -1,15 +1,17 @@
-import requests
 import json
+import logging
 import os
 import sys
 import time
-import logging
-from logging import StreamHandler
-from dotenv import load_dotenv
-import telegram
 from http import HTTPStatus
+from logging import StreamHandler
+
+import requests
+import telegram
+from dotenv import load_dotenv
 from telegram import TelegramError
 
+from exceptions import CustomError
 
 load_dotenv()
 
@@ -50,10 +52,10 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.info(f'Сообщение "{message}" отправлено в Telegram')
-    except TelegramError: # Уточнить исключение        
+    except TelegramError:
         logger.error(f'Сбой при отправке сообщения "{message}" Telegram')
-        # logging.exception(f'Сбой при отправке сообщения "{message}" Telegram')
-        raise TelegramError(f'Сбой при отправке сообщения "{message}" Telegram')
+        raise TelegramError(f'Сбой при отправке сообщения "{message}"Telegram')
+
 
 def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса.
@@ -62,45 +64,31 @@ def get_api_answer(current_timestamp):
     преобразовав его из формата JSON к типам данных Python.
     """
     timestamp = current_timestamp or int(time.time())
-    params = {'from_date': 0} # изменить на timestamp
-    # try:
-    #     response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    # except Exception:
-    #     logger.error('Сбой при запросе к эндпоинту')
-    #     # logging.exception('Сбой при запросе к эндпоинту')
-    #     raise Exception('Сбой при запросе к эндпоинту')
-
+    params = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-        response.raise_for_status()    
     except requests.exceptions.ConnectionError as errc:
         logger.error('Проблемы с сетью')
-        raise errc('Проблемы с сетью')        
-    except requests.exceptions.HTTPError as errh:
-        logger.error('Http вернул неожиданный код')
-        raise errh('Http вернул неожиданный код')            
-    except requests.exceptions.Timeout as errt :
+        raise errc('Проблемы с сетью')
+    except requests.exceptions.Timeout as errt:
         logger.error('Время ожидания запроса истекло')
-        raise errt('Время ожидания запроса истекло')        
+        raise errt('Время ожидания запроса истекло')
     except requests.exceptions.TooManyRedirects as errm:
         logger.error('URL-адрес был неправильным')
-        raise errm('URL-адрес был неправильным')            
+        raise errm('URL-адрес был неправильным')
     except requests.exceptions.RequestException as err:
         logger.error('Сбой при запросе к эндпоинту')
-        raise err('Сбой при запросе к эндпоинту')        
-    except Exception: # без этого исключения не проходит pytest
-        pass
-              
-
+        raise err('Сбой при запросе к эндпоинту')
     if response.status_code != HTTPStatus.OK:
         logger.error(f'Эндпоинт недоступен: {response.status_code}')
-        # logging.exception(f'Эндпоинт недоступен: {response.status_code}')
-        raise Exception(f'Эндпоинт недоступен: {response.status_code}')
+        raise CustomError(f'Эндпоинт недоступен: {response.status_code}')
     try:
         response = response.json()
     except json.decoder.JSONDecodeError:
         logger.error('Ответ не является типом данный Python')
-        raise json.decoder.JSONDecodeError('Ответ не является типом данный Python')
+        raise json.decoder.JSONDecodeError(
+            'Ответ не является типом данный Python'
+        )
     return response
 
 
@@ -118,7 +106,7 @@ def check_response(response):
         raise TypeError('Ответ от API не является словарем')
     except KeyError:
         logger.error('Ключ "homeworks" отсутствует в словаре')
-        raise KeyError('Ключ "homeworks" отсутствует в словаре')    
+        raise KeyError('Ключ "homeworks" отсутствует в словаре')
     if type(homeworks) is not list:
         logger.error('Под ключом `homeworks` ответ от API не в виде списка')
         raise TypeError('Под ключом `homeworks` ответ от API не в виде списка')
@@ -183,6 +171,7 @@ def main():
                 time.sleep(RETRY_TIME)
     except KeyboardInterrupt:
         print('Работа бота завершена!')
+
 
 if __name__ == '__main__':
     main()
