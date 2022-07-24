@@ -67,18 +67,22 @@ def get_api_answer(current_timestamp):
     params = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except requests.exceptions.ConnectionError as errc:
+    except requests.exceptions.ConnectionError:
         logger.error('Проблемы с сетью')
-        raise errc('Проблемы с сетью')
-    except requests.exceptions.Timeout as errt:
+        raise requests.exceptions.ConnectionError('Проблемы с сетью')
+    except requests.exceptions.Timeout:
         logger.error('Время ожидания запроса истекло')
-        raise errt('Время ожидания запроса истекло')
-    except requests.exceptions.TooManyRedirects as errm:
+        raise requests.exceptions.Timeout('Время ожидания запроса истекло')
+    except requests.exceptions.TooManyRedirects:
         logger.error('URL-адрес был неправильным')
-        raise errm('URL-адрес был неправильным')
-    except requests.exceptions.RequestException as err:
+        raise requests.exceptions.TooManyRedirects(
+            'URL-адрес был неправильным'
+        )
+    except requests.exceptions.RequestException:
         logger.error('Сбой при запросе к эндпоинту')
-        raise err('Сбой при запросе к эндпоинту')
+        raise requests.exceptions.RequestException(
+            'Сбой при запросе к эндпоинту'
+        )
     if response.status_code != HTTPStatus.OK:
         logger.error(f'Эндпоинт недоступен: {response.status_code}')
         raise CustomError(f'Эндпоинт недоступен: {response.status_code}')
